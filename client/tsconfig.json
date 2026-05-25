@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2015",
+    "module": "ES2015",
+    "strict": true,
+    "types": ["./temp/declarations/cc.custom-macro", "./temp/declarations/jsb", "./temp/declarations/cc"],
+    "paths": {
+      "db://*": ["./assets/*"]
+    },
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node"
+  },
+  "include": ["assets/**/*.ts"]
+}

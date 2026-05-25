@@ -1,0 +1,14 @@
+{
+  "general": {
+    "designResolution": {
+      "width": 1280,
+      "height": 720,
+      "fitHeight": true,
+      "fitWidth": false
+    }
+  },
+  "script": {
+    "useDefineForClassFields": true,
+    "allowDeclareFields": true
+  }
+}

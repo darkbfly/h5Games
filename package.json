@@ -1,0 +1,13 @@
+{
+  "name": "h5games",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cocos Creator game platform with Colyseus backend",
+  "scripts": {
+    "server": "npm run dev --prefix server",
+    "server:build": "npm run build --prefix server",
+    "server:test": "npm test --prefix server",
+    "install:all": "yarn install --cwd server && yarn install --cwd client",
+    "test": "yarn test --cwd server"
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+library/
+local/
+temp/
+build/
+profiles/
+*.log
+.DS_Store
+Thumbs.db
