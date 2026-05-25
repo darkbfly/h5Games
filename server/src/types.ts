@@ -1,4 +1,4 @@
-import type { GameDefinition } from "./gameCatalog.js";
+import type { GameConfigValues, GameDefinition } from "./gameCatalog.js";
 
 export interface RoomListItem {
   roomId: string;
@@ -15,6 +15,7 @@ export interface CreateRoomOptions {
   roomName: string;
   password?: string;
   gameId: string;
+  gameConfig?: Record<string, unknown>;
 }
 
 export interface JoinRoomOptions {
@@ -28,6 +29,7 @@ export interface GameRoomMetadata {
   hasPassword: boolean;
   minPlayers: number;
   maxPlayers: number;
+  gameConfig?: GameConfigValues;
 }
 
-export type { GameDefinition };
+export type { GameConfigValues, GameDefinition };

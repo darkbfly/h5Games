@@ -16,6 +16,7 @@ export interface CreateRoomPayload {
   roomName: string;
   password?: string;
   gameId: string;
+  gameConfig?: Record<string, number>;
 }
 
 const DEFAULT_SERVER_URL = "ws://localhost:2567";
@@ -95,6 +96,7 @@ export class PlatformClient {
       roomName,
       password: payload.password?.trim() || undefined,
       gameId: payload.gameId,
+      gameConfig: payload.gameConfig,
     });
   }
 
@@ -115,6 +117,13 @@ export class PlatformClient {
 
   getLobbyRoom(): Room | null {
     return this.lobbyRoom;
+  }
+
+  async leaveGameRoom(): Promise<void> {
+    if (this.gameRoom) {
+      await this.gameRoom.leave();
+      this.gameRoom = null;
+    }
   }
 
   private toUserMessage(err: unknown, fallback: string): string {

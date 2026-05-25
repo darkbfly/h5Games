@@ -62,9 +62,17 @@ export function buildLobbyUI(canvas: Node): BuiltLobbyUI {
   createPanel.selectedGameLabel.node.setPosition(0, layout.createPanel.height / 2 - 150, 0);
   const gameListRoot = new Node("GameList");
   gameListRoot.parent = leftPanel;
-  gameListRoot.setPosition(0, -20, 0);
-  gameListRoot.addComponent(UITransform).setContentSize(new Size(layout.inputWidth, 120));
+  gameListRoot.setPosition(0, 30, 0);
+  gameListRoot.addComponent(UITransform).setContentSize(new Size(layout.inputWidth, 140));
   createPanel.gameListRoot = gameListRoot;
+
+  const gameConfigRoot = new Node("GameConfig");
+  gameConfigRoot.parent = leftPanel;
+  gameConfigRoot.setPosition(0, -90, 0);
+  gameConfigRoot.addComponent(UITransform).setContentSize(new Size(layout.inputWidth, 110));
+  gameConfigRoot.active = false;
+  createPanel.gameConfigRoot = gameConfigRoot;
+
   createPanel.createButton = createButton(leftPanel, "创建房间", 0, -layout.createPanel.height / 2 + 40);
 
   const centerPanel = createPanelNode(root, "JoinPanel", layout.joinPanel);
@@ -128,7 +136,7 @@ function getLayoutSpec(): LayoutSpec {
       designHeight: 940,
       titleY: 430,
       statusY: 395,
-      createPanel: { x: 0, y: 230, width: 390, height: 300 },
+      createPanel: { x: 0, y: 230, width: 390, height: 340 },
       joinPanel: { x: 0, y: -75, width: 390, height: 280 },
       roomPanel: { x: 0, y: -350, width: 390, height: 250 },
       inputWidth: 340,

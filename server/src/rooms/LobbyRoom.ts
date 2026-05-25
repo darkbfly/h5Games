@@ -1,5 +1,5 @@
 import { Client, Room, matchMaker } from "@colyseus/core";
-import { GAME_CATALOG, getGameById, isValidGameId } from "../gameCatalog.js";
+import { GAME_CATALOG, getGameById, isValidGameId, validateGameConfig } from "../gameCatalog.js";
 import type { CreateRoomOptions, RoomListItem } from "../types.js";
 import type { GameRoomMetadata } from "../types.js";
 
@@ -97,11 +97,13 @@ export class LobbyRoom extends Room {
     }
 
     const game = getGameById(gameId)!;
+    const gameConfig = validateGameConfig(gameId, options.gameConfig);
 
     return matchMaker.createRoom("game_room", {
       roomName,
       password: password || undefined,
       gameId: game.id,
+      gameConfig,
     });
   }
 }

@@ -1,8 +1,11 @@
-import { _decorator, Component, Node, Label, Button, director } from "cc";
+import { _decorator, Component, Node, Label, Button } from "cc";
+import type { Room } from "colyseus.js";
 import { PlatformClient, type RoomListItem } from "../network/PlatformClient";
 import { CreateRoomPanel, type CreateRoomFormData } from "./CreateRoomPanel";
 import { JoinRoomPanel } from "./JoinRoomPanel";
 import { RoomListItem as RoomListItemView } from "./RoomListItem";
+import { RockPaperScissorsPanel } from "../games/rps/RockPaperScissorsPanel";
+
 const { ccclass, property } = _decorator;
 
 export interface LobbyUIRefs {
@@ -36,6 +39,7 @@ export class LobbyController extends Component {
   private platform = new PlatformClient();
   private uiRefs: LobbyUIRefs | null = null;
   private roomRows: Node[] = [];
+  private rpsPanel: RockPaperScissorsPanel | null = null;
 
   initBuiltUI(refs: LobbyUIRefs) {
     this.uiRefs = refs;
@@ -104,6 +108,7 @@ export class LobbyController extends Component {
         roomName: data.roomName,
         password: data.password || undefined,
         gameId: data.gameId,
+        gameConfig: data.gameConfig,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建失败";
@@ -113,7 +118,7 @@ export class LobbyController extends Component {
 
   private async handleJoinRoom(room: RoomListItem) {
     if (room.hasPassword) {
-      this.joinPanel?.setStatus("该房间需要密码，请使用右侧「密码加入」");
+      this.joinPanel?.setStatus("该房间需要密码，请使用密码加入");
       if (this.joinPanel?.roomIdInput) {
         this.joinPanel.roomIdInput.string = room.roomId;
       }
@@ -122,8 +127,7 @@ export class LobbyController extends Component {
 
     try {
       const gameRoom = await this.platform.joinRoom(room.roomId);
-      this.setStatus(`已加入房间: ${room.roomName}`);
-      console.log("[Lobby] joined game room", gameRoom.id);
+      await this.enterGameRoom(room.gameId, gameRoom);
     } catch (err) {
       const message = err instanceof Error ? err.message : "加入失败";
       this.setStatus(message);
@@ -133,13 +137,50 @@ export class LobbyController extends Component {
   private async handlePasswordJoin(roomId: string, password: string) {
     try {
       const gameRoom = await this.platform.joinRoom(roomId, password);
-      this.joinPanel?.setStatus(`已加入房间 ${gameRoom.id}`);
-      this.setStatus(`已加入房间 ${gameRoom.id}`);
+      const rooms = await this.waitForRoomList();
+      const room = rooms.find((r) => r.roomId === roomId);
+      await this.enterGameRoom(room?.gameId ?? "rock-paper-scissors", gameRoom);
     } catch (err) {
       const message = err instanceof Error ? err.message : "加入失败";
       this.joinPanel?.setStatus(message);
       this.setStatus(message);
     }
+  }
+
+  private waitForRoomList(): Promise<RoomListItem[]> {
+    return new Promise((resolve) => {
+      this.platform.onRoomsList((rooms) => resolve(rooms));
+      this.platform.requestRoomList();
+    });
+  }
+
+  private async enterGameRoom(gameId: string, gameRoom: Room) {
+    if (gameId === "rock-paper-scissors") {
+      this.showRockPaperScissors(gameRoom);
+      return;
+    }
+    this.setStatus(`已加入房间: ${gameRoom.id}`);
+    console.log("[Lobby] joined game room", gameRoom.id);
+  }
+
+  private showRockPaperScissors(gameRoom: Room) {
+    const canvas = this.node.parent;
+    if (!canvas) {
+      return;
+    }
+
+    this.node.active = false;
+    this.rpsPanel = RockPaperScissorsPanel.create(canvas, gameRoom, () => this.exitToLobby());
+    this.setStatus("已进入锤子剪刀布房间");
+  }
+
+  private exitToLobby() {
+    void this.platform.leaveGameRoom();
+    this.rpsPanel?.node.destroy();
+    this.rpsPanel = null;
+    this.node.active = true;
+    this.refreshRooms();
+    this.setStatus("已返回大厅");
   }
 
   private renderRoomList(rooms: RoomListItem[]) {
