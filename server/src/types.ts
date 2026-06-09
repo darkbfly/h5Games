@@ -1,4 +1,8 @@
 export type {
+  UserProfile,
+  AuthResponsePayload,
+  AuthRequestPayload,
+  LobbyJoinOptions,
   RoomListItem,
   CreateRoomOptions,
   JoinRoomOptions,

@@ -21,6 +21,7 @@ export class RockPaperScissorsController {
   private deadlineMs = 0;
   private winnerSessionId: string | null = null;
   private readonly playerOrder: string[] = [];
+  private readonly usernames = new Map<string, string>();
   private readonly scores = new Map<string, number>();
   private readonly choices = new Map<string, RpsChoice>();
   private roundTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,7 +49,11 @@ export class RockPaperScissorsController {
       return;
     }
 
+    const auth = client.auth as { username?: string } | undefined;
+    const username = auth?.username ?? `玩家${client.sessionId.slice(0, 6)}`;
+
     this.playerOrder.push(client.sessionId);
+    this.usernames.set(client.sessionId, username);
     this.scores.set(client.sessionId, 0);
 
     if (this.playerOrder.length === 2) {
@@ -65,6 +70,7 @@ export class RockPaperScissorsController {
     if (index >= 0) {
       this.playerOrder.splice(index, 1);
     }
+    this.usernames.delete(client.sessionId);
     this.scores.delete(client.sessionId);
     this.choices.delete(client.sessionId);
 
@@ -190,7 +196,7 @@ export class RockPaperScissorsController {
     if (leader && (this.scores.get(leader) ?? 0) >= this.winningScore) {
       this.phase = "finished";
       this.winnerSessionId = leader;
-      this.broadcastState(`游戏结束，玩家 ${leader.slice(0, 6)} 获胜`);
+      this.broadcastState(`游戏结束，${this.usernames.get(leader) ?? leader.slice(0, 6)} 获胜`);
       return;
     }
 
@@ -242,6 +248,7 @@ export class RockPaperScissorsController {
       deadlineMs: this.deadlineMs,
       players: this.playerOrder.map((sessionId) => ({
         sessionId,
+        username: this.usernames.get(sessionId) ?? sessionId.slice(0, 6),
         score: this.scores.get(sessionId) ?? 0,
         hasChosen: this.choices.has(sessionId),
       })),

@@ -38,6 +38,40 @@ body {
   pointer-events: auto;
 }
 
+.auth-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: rgba(22, 33, 62, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.auth-card h1 {
+  color: #fff;
+  font-size: 28px;
+  margin-bottom: 16px;
+}
+
+.user-badge {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(233, 69, 96, 0.18);
+  color: #ffb3c1;
+  font-size: 13px;
+}
+
 .lobby-shell {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -207,6 +241,16 @@ button.secondary {
 
 button.secondary:hover {
   background: #5a9bc4;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #d7d7e5;
+}
+
+button.ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .room-list {

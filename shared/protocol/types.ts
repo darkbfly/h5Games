@@ -1,5 +1,20 @@
 import type { GameConfigValues, GameDefinition } from "../gameCatalog.js";
 
+export interface UserProfile {
+  id: string;
+  username: string;
+}
+
+export interface AuthResponsePayload {
+  token: string;
+  user: UserProfile;
+}
+
+export interface AuthRequestPayload {
+  username: string;
+  password: string;
+}
+
 export interface RoomListItem {
   roomId: string;
   roomName: string;
@@ -9,6 +24,7 @@ export interface RoomListItem {
   maxClients: number;
   minPlayers: number;
   hasPassword: boolean;
+  ownerUsername?: string;
 }
 
 export interface CreateRoomOptions {
@@ -20,6 +36,11 @@ export interface CreateRoomOptions {
 
 export interface JoinRoomOptions {
   password?: string;
+  token?: string;
+}
+
+export interface LobbyJoinOptions {
+  token?: string;
 }
 
 export interface GameRoomMetadata {
@@ -29,6 +50,7 @@ export interface GameRoomMetadata {
   hasPassword: boolean;
   minPlayers: number;
   maxPlayers: number;
+  ownerUsername?: string;
   gameConfig?: GameConfigValues;
 }
 
@@ -51,6 +73,7 @@ export type RpsPhase = "waiting" | "playing" | "round_result" | "finished";
 
 export interface RpsPlayerState {
   sessionId: string;
+  username: string;
   score: number;
   hasChosen: boolean;
 }

@@ -4,9 +4,16 @@ import { Client } from "colyseus.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  SERVER_URL,
+  registerUser,
+  loginUser,
+  joinLobby,
+  joinGameRoom,
+} from "./authHelpers.js";
 
 const SERVER_PORT = process.env.TEST_PORT ?? "2588";
-const SERVER_URL = `ws://localhost:${SERVER_PORT}`;
+const HTTP_BASE = `http://127.0.0.1:${SERVER_PORT}`;
 
 let serverProcess: ChildProcess | null = null;
 
@@ -17,7 +24,7 @@ function delay(ms: number) {
 async function waitForHealth(maxAttempts = 40) {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/health`);
+      const response = await fetch(`${HTTP_BASE}/health`);
       if (response.ok) {
         return;
       }
@@ -31,9 +38,9 @@ async function waitForHealth(maxAttempts = 40) {
 
 async function waitForServer() {
   await waitForHealth();
-
+  const auth = await registerUser(`boot_${Date.now()}`, "password123");
   const client = new Client(SERVER_URL);
-  const lobby = await client.joinOrCreate("lobby");
+  const lobby = await joinLobby(client, auth.token);
   const games = await new Promise<{ id: string }[]>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("games_list timeout")), 5000);
     lobby.onMessage("games_list", (data: { games: { id: string }[] }) => {
@@ -95,9 +102,63 @@ after(async () => {
   await delay(200);
 });
 
-test("lists available games", async () => {
+test("registers and logs in user", async () => {
+  const username = `alice_${Date.now()}`;
+  const password = "password123";
+
+  const registered = await registerUser(username, password);
+  assert.ok(registered.token);
+  assert.equal(registered.user.username, username);
+
+  const loggedIn = await loginUser(username, password);
+  assert.ok(loggedIn.token);
+  assert.equal(loggedIn.user.username, username);
+});
+
+test("rejects duplicate username on register", async () => {
+  const username = `dup_${Date.now()}`;
+  await registerUser(username, "password123");
+
+  let rejected = false;
+  try {
+    await registerUser(username, "password456");
+  } catch (err) {
+    rejected = true;
+    const message = err instanceof Error ? err.message : String(err);
+    assert.match(message, /占用|USERNAME_TAKEN/i);
+  }
+  assert.ok(rejected);
+});
+
+test("rejects invalid credentials on login", async () => {
+  const username = `bob_${Date.now()}`;
+  await registerUser(username, "password123");
+
+  const res = await fetch(`${HTTP_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password: "wrongpass" }),
+  });
+  assert.equal(res.status, 401);
+});
+
+test("rejects lobby join without token", async () => {
   const client = new Client(SERVER_URL);
-  const lobby = await client.joinOrCreate("lobby");
+  let rejected = false;
+  try {
+    await client.joinOrCreate("lobby");
+  } catch (err) {
+    rejected = true;
+    const message = err instanceof Error ? err.message : String(err);
+    assert.match(message, /401|未登录|登录|auth|join|error/i);
+  }
+  assert.ok(rejected);
+});
+
+test("lists available games", async () => {
+  const auth = await registerUser(`games_${Date.now()}`, "password123");
+  const client = new Client(SERVER_URL);
+  const lobby = await joinLobby(client, auth.token);
 
   const games = await new Promise<{ id: string; name: string }[]>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("games_list timeout")), 5000);
@@ -114,9 +175,11 @@ test("lists available games", async () => {
   await lobby.leave();
 });
 
-test("creates room and lists it in lobby", async () => {
+test("creates room and lists owner username in lobby", async () => {
+  const username = `host_${Date.now()}`;
+  const auth = await registerUser(username, "password123");
   const client = new Client(SERVER_URL);
-  const lobby = await client.joinOrCreate("lobby");
+  const lobby = await joinLobby(client, auth.token);
 
   const created = await new Promise<{ roomId: string }>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("room_created timeout")), 5000);
@@ -131,25 +194,34 @@ test("creates room and lists it in lobby", async () => {
   });
 
   assert.ok(created.roomId);
-
   await delay(300);
 
-  const rooms = await new Promise<{ roomId: string; roomName: string }[]>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("rooms_list timeout")), 5000);
-    lobby.onMessage("rooms_list", (data: { rooms: { roomId: string; roomName: string }[] }) => {
-      clearTimeout(timeout);
-      resolve(data.rooms);
-    });
-    lobby.send("list_rooms", { keyword: "Alpha" });
-  });
+  const rooms = await new Promise<{ roomId: string; roomName: string; ownerUsername?: string }[]>(
+    (resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("rooms_list timeout")), 5000);
+      lobby.onMessage("rooms_list", (data: {
+        rooms: { roomId: string; roomName: string; ownerUsername?: string }[];
+      }) => {
+        clearTimeout(timeout);
+        resolve(data.rooms);
+      });
+      lobby.send("list_rooms", { keyword: "Alpha" });
+    }
+  );
 
-  assert.ok(rooms.some((r) => r.roomId === created.roomId && r.roomName === "TestRoom_Alpha"));
+  const room = rooms.find((r) => r.roomId === created.roomId);
+  assert.ok(room);
+  assert.equal(room?.roomName, "TestRoom_Alpha");
+  assert.equal(room?.ownerUsername, username);
   await lobby.leave();
 });
 
 test("rejects wrong password and accepts correct password", async () => {
+  const hostAuth = await registerUser(`host_pw_${Date.now()}`, "password123");
+  const guestAuth = await registerUser(`guest_pw_${Date.now()}`, "password123");
+
   const hostClient = new Client(SERVER_URL);
-  const hostLobby = await hostClient.joinOrCreate("lobby");
+  const hostLobby = await joinLobby(hostClient, hostAuth.token);
 
   const created = await new Promise<{ roomId: string }>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("room_created timeout")), 5000);
@@ -167,13 +239,14 @@ test("rejects wrong password and accepts correct password", async () => {
   await hostLobby.leave();
 
   const guestClient = new Client(SERVER_URL);
-  const room = await guestClient.joinById(created.roomId, { password: "abc123" });
+  const room = await joinGameRoom(guestClient, created.roomId, guestAuth.token, "abc123");
   assert.equal(room.id, created.roomId);
 
   let rejected = false;
   try {
+    const badAuth = await registerUser(`bad_pw_${Date.now()}`, "password123");
     const badClient = new Client(SERVER_URL);
-    const badRoom = await badClient.joinById(created.roomId, { password: "wrong" });
+    const badRoom = await joinGameRoom(badClient, created.roomId, badAuth.token, "wrong");
     await badRoom.leave();
   } catch (err) {
     rejected = true;
@@ -185,9 +258,40 @@ test("rejects wrong password and accepts correct password", async () => {
   await room.leave();
 });
 
+test("rejects game room join without token", async () => {
+  const hostAuth = await registerUser(`host_no_token_${Date.now()}`, "password123");
+  const hostClient = new Client(SERVER_URL);
+  const hostLobby = await joinLobby(hostClient, hostAuth.token);
+
+  const created = await new Promise<{ roomId: string }>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("room_created timeout")), 5000);
+    hostLobby.onMessage("room_created", (data: { roomId: string }) => {
+      clearTimeout(timeout);
+      resolve(data);
+    });
+    hostLobby.send("create_room", {
+      roomName: "AuthRoom",
+      gameId: "guess-number",
+    });
+  });
+  await hostLobby.leave();
+
+  const guestClient = new Client(SERVER_URL);
+  let rejected = false;
+  try {
+    await guestClient.joinById(created.roomId);
+  } catch (err) {
+    rejected = true;
+    const message = err instanceof Error ? err.message : String(err);
+    assert.match(message, /401|未登录|登录|auth|join|error/i);
+  }
+  assert.ok(rejected);
+});
+
 test("rejects unknown game id on create", async () => {
+  const auth = await registerUser(`bad_game_${Date.now()}`, "password123");
   const client = new Client(SERVER_URL);
-  const lobby = await client.joinOrCreate("lobby");
+  const lobby = await joinLobby(client, auth.token);
 
   const errorMessage = await new Promise<string>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("error timeout")), 5000);
@@ -206,8 +310,9 @@ test("rejects unknown game id on create", async () => {
 });
 
 test("rejects invalid rock-paper-scissors config", async () => {
+  const auth = await registerUser(`bad_rps_${Date.now()}`, "password123");
   const client = new Client(SERVER_URL);
-  const lobby = await client.joinOrCreate("lobby");
+  const lobby = await joinLobby(client, auth.token);
 
   const errorMessage = await new Promise<string>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("error timeout")), 5000);
@@ -226,16 +331,19 @@ test("rejects invalid rock-paper-scissors config", async () => {
   await lobby.leave();
 });
 
-test("plays rock-paper-scissors round and finishes at winning score", async () => {
+test("plays rock-paper-scissors round and includes usernames", async () => {
+  const p1Auth = await registerUser(`rps_p1_${Date.now()}`, "password123");
+  const p2Auth = await registerUser(`rps_p2_${Date.now()}`, "password123");
+
   const lobbyClient = new Client(SERVER_URL);
-  const lobby = await lobbyClient.joinOrCreate("lobby");
+  const lobby = await joinLobby(lobbyClient, p1Auth.token);
   const created = await createRpsRoom(lobby, { choiceTimeSeconds: 3, winningScore: 1 });
   await lobby.leave();
 
   const p1 = new Client(SERVER_URL);
   const p2 = new Client(SERVER_URL);
-  const room1 = await p1.joinById(created.roomId);
-  const room2 = await p2.joinById(created.roomId);
+  const room1 = await joinGameRoom(p1, created.roomId, p1Auth.token);
+  const room2 = await joinGameRoom(p2, created.roomId, p2Auth.token);
 
   const waitPlaying = (room: typeof room1) =>
     new Promise<void>((resolve, reject) => {
@@ -253,9 +361,17 @@ test("plays rock-paper-scissors round and finishes at winning score", async () =
   room1.send("rps_choose", { choice: "rock" });
   room2.send("rps_choose", { choice: "scissors" });
 
-  const finished = await new Promise<{ phase: string; winnerSessionId: string | null }>((resolve, reject) => {
+  const finished = await new Promise<{
+    phase: string;
+    winnerSessionId: string | null;
+    players: { username: string }[];
+  }>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("finished timeout")), 8000);
-    room1.onMessage("rps_state", (data: { phase: string; winnerSessionId: string | null }) => {
+    room1.onMessage("rps_state", (data: {
+      phase: string;
+      winnerSessionId: string | null;
+      players: { username: string }[];
+    }) => {
       if (data.phase === "finished") {
         clearTimeout(timeout);
         resolve(data);
@@ -265,26 +381,31 @@ test("plays rock-paper-scissors round and finishes at winning score", async () =
 
   assert.equal(finished.phase, "finished");
   assert.ok(finished.winnerSessionId);
+  assert.equal(finished.players.length, 2);
+  assert.ok(finished.players.some((p) => p.username === p1Auth.user.username));
+  assert.ok(finished.players.some((p) => p.username === p2Auth.user.username));
 
   await room1.leave();
   await room2.leave();
 });
 
 test("timeout causes missing player to lose the round", async () => {
+  const p1Auth = await registerUser(`timeout_p1_${Date.now()}`, "password123");
+  const p2Auth = await registerUser(`timeout_p2_${Date.now()}`, "password123");
+
   const lobbyClient = new Client(SERVER_URL);
-  const lobby = await lobbyClient.joinOrCreate("lobby");
+  const lobby = await joinLobby(lobbyClient, p1Auth.token);
   const created = await createRpsRoom(lobby, { choiceTimeSeconds: 3, winningScore: 5 });
   await lobby.leave();
 
   const p1 = new Client(SERVER_URL);
   const p2 = new Client(SERVER_URL);
-  const room1 = await p1.joinById(created.roomId);
-  const room2 = await p2.joinById(created.roomId);
+  const room1 = await joinGameRoom(p1, created.roomId, p1Auth.token);
+  const room2 = await joinGameRoom(p2, created.roomId, p2Auth.token);
 
   await delay(500);
 
   room1.send("rps_choose", { choice: "paper" });
-  // opponent does not choose; round should end after 3 seconds
 
   const roundResult = await new Promise<{
     roundWinnerSessionId: string | null;

@@ -1,6 +1,7 @@
 import type { RoomListItem } from "@shared/protocol/types.js";
 import { StateStore } from "../state/StateStore.js";
 import { NetworkService } from "../network/NetworkService.js";
+import { AuthScene } from "../scenes/AuthScene.js";
 import { LoadingScene } from "../scenes/LoadingScene.js";
 import { LobbyScene } from "../scenes/LobbyScene.js";
 import { RoomScene } from "../scenes/RoomScene.js";
@@ -16,6 +17,7 @@ export class App {
   private readonly container: HTMLElement;
   private readonly overlay: HTMLElement;
 
+  private authScene: AuthScene | null = null;
   private loadingScene: LoadingScene | null = null;
   private lobbyScene: LobbyScene | null = null;
   private roomScene: RoomScene | null = null;
@@ -32,6 +34,28 @@ export class App {
   }
 
   async start(): Promise<void> {
+    const state = this.store.get();
+    if (state.authToken && state.currentUser) {
+      await this.enterPlatform();
+      return;
+    }
+
+    this.authScene = new AuthScene(
+      this.store,
+      this.network,
+      this.overlay,
+      () => void this.handleAuthenticated()
+    );
+    this.authScene.start();
+  }
+
+  private async handleAuthenticated(): Promise<void> {
+    this.authScene?.dispose();
+    this.authScene = null;
+    await this.enterPlatform();
+  }
+
+  private async enterPlatform(): Promise<void> {
     this.loadingScene = new LoadingScene(
       this.store,
       this.network,
@@ -49,7 +73,8 @@ export class App {
       this.store,
       this.network,
       this.overlay,
-      (room, password) => void this.handleJoinRoom(room, password)
+      (room, password) => void this.handleJoinRoom(room, password),
+      () => this.logout()
     );
     this.lobbyScene.start();
   }
@@ -98,5 +123,25 @@ export class App {
     this.store.resetGameState();
     this.showLobby();
     this.network.requestRoomList();
+  }
+
+  private logout(): void {
+    this.gameScene?.dispose();
+    this.gameScene = null;
+    this.roomScene?.dispose();
+    this.roomScene = null;
+    this.lobbyScene?.dispose();
+    this.lobbyScene = null;
+    this.loadingScene?.dispose();
+    this.loadingScene = null;
+
+    this.network.logout();
+    this.authScene = new AuthScene(
+      this.store,
+      this.network,
+      this.overlay,
+      () => void this.handleAuthenticated()
+    );
+    this.authScene.start();
   }
 }

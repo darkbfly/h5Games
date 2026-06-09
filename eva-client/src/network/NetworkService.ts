@@ -6,6 +6,7 @@ import {
 } from "@shared/protocol/messages.js";
 import type { PlatformErrorPayload } from "@shared/protocol/errors.js";
 import type {
+  AuthResponsePayload,
   CreateRoomOptions,
   GameDefinition,
   RoomCreatedPayload,
@@ -34,24 +35,55 @@ export class NetworkService {
     this.client = new Client(url);
   }
 
+  private getHttpBaseUrl(): string {
+    return this.store.get().serverUrl.replace(/^ws/, "http").replace(/\/$/, "");
+  }
+
+  private requireToken(): string {
+    const token = this.store.get().authToken;
+    if (!token) {
+      throw new Error("请先登录");
+    }
+    return token;
+  }
+
   async checkHealth(): Promise<boolean> {
-    const httpUrl = this.store.get().serverUrl
-      .replace(/^ws/, "http")
-      .replace(/\/$/, "");
     try {
-      const start = performance.now();
-      const res = await fetch(`${httpUrl}/health`);
-      const elapsed = performance.now() - start;
+      const res = await fetch(`${this.getHttpBaseUrl()}/health`);
       if (!res.ok) return false;
       const data = await res.json();
-      if (data?.metrics?.avgRttMs !== undefined) {
-        // health check RTT available for display
-        void elapsed;
-      }
       return data.ok === true;
     } catch {
       return false;
     }
+  }
+
+  async register(username: string, password: string): Promise<AuthResponsePayload> {
+    const res = await fetch(`${this.getHttpBaseUrl()}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message ?? "注册失败");
+    }
+    this.store.setAuth(data.token, data.user);
+    return data as AuthResponsePayload;
+  }
+
+  async login(username: string, password: string): Promise<AuthResponsePayload> {
+    const res = await fetch(`${this.getHttpBaseUrl()}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message ?? "登录失败");
+    }
+    this.store.setAuth(data.token, data.user);
+    return data as AuthResponsePayload;
   }
 
   async connectLobby(): Promise<void> {
@@ -59,13 +91,14 @@ export class NetworkService {
       return;
     }
 
+    const token = this.requireToken();
     const healthy = await this.checkHealth();
     if (!healthy) {
       throw new Error("服务器不可用，请确认服务端已启动");
     }
 
     try {
-      this.lobbyRoom = await this.client.joinOrCreate("lobby");
+      this.lobbyRoom = await this.client.joinOrCreate("lobby", { token });
       this.reconnectAttempts = 0;
       this.bindLobbyHandlers();
       this.store.patch({ connected: true, statusMessage: "已连接大厅" });
@@ -110,6 +143,7 @@ export class NetworkService {
 
   private scheduleLobbyReconnect(): void {
     if (this.reconnectTimer) return;
+    if (!this.store.get().authToken) return;
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       this.store.patch({ statusMessage: "连接已断开，请刷新页面重试" });
       return;
@@ -161,8 +195,10 @@ export class NetworkService {
   }
 
   async joinRoom(roomId: string, password?: string): Promise<Room> {
+    const token = this.requireToken();
     try {
       this.gameRoom = await this.client.joinById(roomId, {
+        token,
         password: password?.trim() || undefined,
       });
       this.bindGameHandlers();
@@ -208,6 +244,23 @@ export class NetworkService {
     this.store.resetGameState();
   }
 
+  logout(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    void this.gameRoom?.leave();
+    void this.lobbyRoom?.leave();
+    this.gameRoom = null;
+    this.lobbyRoom = null;
+    this.boundLobbyHandlers = false;
+    this.reconnectAttempts = 0;
+    this.store.patch({ connected: false, rooms: [], games: [] });
+    this.store.resetGameState();
+    this.store.clearAuth();
+  }
+
   getGameRoom(): Room | null {
     return this.gameRoom;
   }
@@ -216,6 +269,9 @@ export class NetworkService {
     if (err instanceof Error) {
       if (/password|密码|403|WRONG_PASSWORD/i.test(err.message)) {
         return "房间密码错误";
+      }
+      if (/401|未登录|登录已失效|UNAUTHORIZED/i.test(err.message)) {
+        return "登录已失效，请重新登录";
       }
       if (/locked|full|满|ROOM_FULL/i.test(err.message)) {
         return "房间已满";
@@ -233,5 +289,6 @@ export class NetworkService {
     void this.leaveGameRoom();
     void this.lobbyRoom?.leave();
     this.lobbyRoom = null;
+    this.boundLobbyHandlers = false;
   }
 }

@@ -7,6 +7,7 @@ import { monitor } from "@colyseus/monitor";
 import { LobbyRoom } from "./rooms/LobbyRoom.js";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { buildMetrics } from "./utils/metrics.js";
+import { authService } from "./auth/AuthService.js";
 
 const PORT = Number(process.env.PORT ?? 2567);
 
@@ -25,6 +26,40 @@ app.get("/health", async (_req, res) => {
     ok: true,
     metrics: buildMetrics(lobbyClients, gameRooms.length, gameClients),
   });
+});
+
+app.post("/auth/register", (req, res) => {
+  const username = String(req.body?.username ?? "");
+  const password = String(req.body?.password ?? "");
+
+  try {
+    const result = authService.register(username, password);
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "注册失败";
+    if (message === "USERNAME_TAKEN") {
+      res.status(409).json({ code: "USERNAME_TAKEN", message: "用户名已被占用" });
+      return;
+    }
+    res.status(400).json({ code: "INVALID_REQUEST", message });
+  }
+});
+
+app.post("/auth/login", (req, res) => {
+  const username = String(req.body?.username ?? "");
+  const password = String(req.body?.password ?? "");
+
+  try {
+    const result = authService.login(username, password);
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "登录失败";
+    if (message === "INVALID_CREDENTIALS") {
+      res.status(401).json({ code: "INVALID_CREDENTIALS", message: "用户名或密码错误" });
+      return;
+    }
+    res.status(400).json({ code: "INVALID_REQUEST", message });
+  }
 });
 
 const httpServer = createServer(app);

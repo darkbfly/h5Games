@@ -4,9 +4,9 @@ import { Client } from "colyseus.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { SERVER_URL, registerUser, joinLobby } from "./authHelpers.js";
 
 const SERVER_PORT = process.env.LOAD_TEST_PORT ?? "2599";
-const SERVER_URL = `ws://localhost:${SERVER_PORT}`;
 
 let serverProcess: ChildProcess | null = null;
 
@@ -28,6 +28,7 @@ async function waitForHealth(maxAttempts = 40) {
 }
 
 before(async () => {
+  process.env.LOAD_TEST_PORT = SERVER_PORT;
   const serverDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
   const tsxCli = path.join(serverDir, "node_modules", "tsx", "dist", "cli.mjs");
   serverProcess = spawn(process.execPath, [tsxCli, "src/index.ts"], {
@@ -60,9 +61,10 @@ test("concurrent lobby connections", async () => {
   const lobbies = [];
 
   for (let i = 0; i < count; i++) {
+    const auth = await registerUser(`load_${i}_${Date.now()}`, "password123");
     const c = new Client(SERVER_URL);
     clients.push(c);
-    lobbies.push(c.joinOrCreate("lobby"));
+    lobbies.push(joinLobby(c, auth.token));
   }
 
   const rooms = await Promise.all(lobbies);
@@ -74,8 +76,9 @@ test("concurrent lobby connections", async () => {
 });
 
 test("rate limit rejects excessive create_room", async () => {
+  const auth = await registerUser(`rate_${Date.now()}`, "password123");
   const client = new Client(SERVER_URL);
-  const lobby = await client.joinOrCreate("lobby");
+  const lobby = await joinLobby(client, auth.token);
 
   let rateLimited = false;
   lobby.onMessage("error", (data: { message: string }) => {

@@ -10,7 +10,8 @@ export class LobbyScene {
     private readonly store: StateStore,
     private readonly network: NetworkService,
     private readonly overlay: HTMLElement,
-    private readonly onJoinGame: (room: RoomListItem, password?: string) => void
+    private readonly onJoinGame: (room: RoomListItem, password?: string) => void,
+    private readonly onLogout: () => void
   ) {}
 
   start(): void {
@@ -18,6 +19,7 @@ export class LobbyScene {
     this.unsubscribe = this.store.subscribe((state) => {
       if (state.scene !== "lobby") return;
       this.updateStatus(state.statusMessage);
+      this.updateCurrentUser(state.currentUser?.username ?? "");
       this.updateRoomList(state.rooms);
       this.updateGameSelect(state.games);
     });
@@ -37,6 +39,7 @@ export class LobbyScene {
           <div>
             <p class="eyebrow">H5 Games</p>
             <h1>游戏大厅</h1>
+            <div class="user-badge" id="current-user">欢迎，${state.currentUser?.username ?? "玩家"}</div>
             <div class="status-bar" id="lobby-status">${state.statusMessage}</div>
           </div>
 
@@ -61,6 +64,7 @@ export class LobbyScene {
           </div>
 
           <button id="btn-refresh" class="secondary full-width">刷新房间</button>
+          <button id="btn-logout" class="ghost full-width">退出用户</button>
         </aside>
 
         <main class="lobby-main">
@@ -70,7 +74,7 @@ export class LobbyScene {
               <h2>在线房间</h2>
             </div>
             <div class="toolbar">
-              <input id="search-keyword" placeholder="搜索房间名" />
+              <input id="search-keyword" placeholder="搜索房间名或房主" />
               <button id="btn-search" class="secondary">搜索</button>
             </div>
           </header>
@@ -92,6 +96,7 @@ export class LobbyScene {
     });
     this.overlay.querySelector("#btn-create")?.addEventListener("click", () => this.handleCreate());
     this.overlay.querySelector("#btn-refresh")?.addEventListener("click", () => this.network.requestRoomList());
+    this.overlay.querySelector("#btn-logout")?.addEventListener("click", () => this.onLogout());
     this.overlay.querySelector("#btn-search")?.addEventListener("click", () => {
       const keyword = (this.overlay.querySelector("#search-keyword") as HTMLInputElement).value;
       this.network.searchRooms(keyword);
@@ -106,6 +111,13 @@ export class LobbyScene {
   private updateStatus(message: string): void {
     const el = this.overlay.querySelector("#lobby-status");
     if (el) el.textContent = message;
+  }
+
+  private updateCurrentUser(username: string): void {
+    const el = this.overlay.querySelector("#current-user");
+    if (el && username) {
+      el.textContent = `欢迎，${username}`;
+    }
   }
 
   private updateGameSelect(games: GameDefinition[]): void {
@@ -163,7 +175,7 @@ export class LobbyScene {
         <li class="room-item" data-room-id="${r.roomId}">
           <div>
             <strong>${r.roomName}</strong>
-            <div class="room-meta">${r.gameName} | ${r.clients}/${r.maxClients}人 ${r.hasPassword ? "🔒" : ""}</div>
+            <div class="room-meta">${r.gameName} | 房主 ${r.ownerUsername ?? "未知"} | ${r.clients}/${r.maxClients}人 ${r.hasPassword ? "🔒" : ""}</div>
           </div>
           <button class="secondary" data-join="${r.roomId}">加入</button>
         </li>

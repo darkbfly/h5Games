@@ -2,7 +2,13 @@ import { Client, Room, ServerError } from "@colyseus/core";
 import { getGameById, validateGameConfig, type GameConfigValues } from "../gameCatalog.js";
 import { RockPaperScissorsController } from "../games/RockPaperScissorsController.js";
 import type { CreateRoomOptions, GameRoomMetadata, JoinRoomOptions } from "../types.js";
+import { authenticateToken } from "../auth/resolveAuth.js";
+
 const RECONNECT_SECONDS = 10;
+
+interface GameRoomCreateOptions extends CreateRoomOptions {
+  ownerUsername?: string;
+}
 
 export class GameRoom extends Room {
   autoDispose = false;
@@ -11,7 +17,7 @@ export class GameRoom extends Room {
   private gameConfig: GameConfigValues | undefined;
   private rps: RockPaperScissorsController | null = null;
 
-  async onCreate(options: CreateRoomOptions) {
+  async onCreate(options: GameRoomCreateOptions) {
     const roomName = (options.roomName ?? "").trim();
     const gameId = options.gameId ?? "";
 
@@ -43,6 +49,7 @@ export class GameRoom extends Room {
       hasPassword: this.roomPassword.length > 0,
       minPlayers: game.minPlayers,
       maxPlayers: game.maxPlayers,
+      ownerUsername: options.ownerUsername,
       gameConfig: this.gameConfig,
     };
 
@@ -50,34 +57,36 @@ export class GameRoom extends Room {
   }
 
   async onAuth(_client: Client, options: JoinRoomOptions) {
-    if (!this.roomPassword) {
-      return true;
+    const auth = authenticateToken(options?.token);
+
+    if (this.roomPassword) {
+      const password = (options?.password ?? "").trim();
+      if (password !== this.roomPassword) {
+        throw new ServerError(403, "房间密码错误");
+      }
     }
 
-    const password = (options?.password ?? "").trim();
-    if (password !== this.roomPassword) {
-      throw new ServerError(403, "房间密码错误");
-    }
-
-    return true;
+    return auth;
   }
 
   onJoin(client: Client) {
-    console.log(`[GameRoom] ${client.sessionId} joined ${this.roomId} (${this.gameId})`);
+    const auth = client.auth as { username?: string } | undefined;
+    console.log(`[GameRoom] ${auth?.username ?? client.sessionId} joined ${this.roomId} (${this.gameId})`);
     this.rps?.onJoin(client);
     this.rps?.sendStateTo(client);
   }
 
   async onLeave(client: Client, consented: boolean) {
-    console.log(`[GameRoom] ${client.sessionId} left ${this.roomId} (consented=${consented})`);
+    const auth = client.auth as { username?: string } | undefined;
+    console.log(`[GameRoom] ${auth?.username ?? client.sessionId} left ${this.roomId} (consented=${consented})`);
 
     if (!consented) {
       try {
         await this.allowReconnection(client, RECONNECT_SECONDS);
-        console.log(`[GameRoom] ${client.sessionId} reconnected`);
+        console.log(`[GameRoom] ${auth?.username ?? client.sessionId} reconnected`);
         return;
       } catch {
-        console.log(`[GameRoom] ${client.sessionId} reconnection expired`);
+        console.log(`[GameRoom] ${auth?.username ?? client.sessionId} reconnection expired`);
       }
     }
 

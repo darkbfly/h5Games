@@ -3,15 +3,18 @@ import type {
   RoomListItem,
   RpsRoundResultPayload,
   RpsStatePayload,
+  UserProfile,
 } from "@shared/protocol/types.js";
 
-export type AppScene = "loading" | "lobby" | "room" | "game";
+export type AppScene = "auth" | "loading" | "lobby" | "room" | "game";
 
 export interface AppState {
   scene: AppScene;
   statusMessage: string;
   serverUrl: string;
   connected: boolean;
+  authToken: string | null;
+  currentUser: UserProfile | null;
   games: GameDefinition[];
   rooms: RoomListItem[];
   currentRoomId: string | null;
@@ -24,23 +27,43 @@ export interface AppState {
 type Listener = (state: AppState) => void;
 
 const DEFAULT_SERVER = import.meta.env.VITE_SERVER_URL ?? "ws://localhost:2567";
+const AUTH_STORAGE_KEY = "h5games_auth";
+
+function loadStoredAuth(): { token: string; user: UserProfile } | null {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { token?: string; user?: UserProfile };
+    if (!parsed.token || !parsed.user?.id || !parsed.user?.username) return null;
+    return { token: parsed.token, user: parsed.user };
+  } catch {
+    return null;
+  }
+}
 
 export class StateStore {
-  private state: AppState = {
-    scene: "loading",
-    statusMessage: "正在连接...",
-    serverUrl: DEFAULT_SERVER,
-    connected: false,
-    games: [],
-    rooms: [],
-    currentRoomId: null,
-    currentGameId: null,
-    mySessionId: null,
-    rpsState: null,
-    rpsRoundResult: null,
-  };
+  private state: AppState;
 
   private listeners = new Set<Listener>();
+
+  constructor() {
+    const stored = loadStoredAuth();
+    this.state = {
+      scene: stored ? "loading" : "auth",
+      statusMessage: stored ? "正在连接..." : "请登录或注册",
+      serverUrl: DEFAULT_SERVER,
+      connected: false,
+      authToken: stored?.token ?? null,
+      currentUser: stored?.user ?? null,
+      games: [],
+      rooms: [],
+      currentRoomId: null,
+      currentGameId: null,
+      mySessionId: null,
+      rpsState: null,
+      rpsRoundResult: null,
+    };
+  }
 
   get(): Readonly<AppState> {
     return this.state;
@@ -64,6 +87,16 @@ export class StateStore {
       scene,
       ...(message !== undefined ? { statusMessage: message } : {}),
     });
+  }
+
+  setAuth(token: string, user: UserProfile): void {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token, user }));
+    this.patch({ authToken: token, currentUser: user });
+  }
+
+  clearAuth(): void {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    this.patch({ authToken: null, currentUser: null, scene: "auth", statusMessage: "请登录或注册" });
   }
 
   resetGameState(): void {

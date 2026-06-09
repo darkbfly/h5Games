@@ -1,11 +1,12 @@
 import { Client, Room, matchMaker } from "@colyseus/core";
 import { GAME_CATALOG, getGameById, isValidGameId, validateGameConfig } from "../gameCatalog.js";
-import type { CreateRoomOptions, RoomListItem } from "../types.js";
+import type { CreateRoomOptions, LobbyJoinOptions, RoomListItem } from "../types.js";
 import type { GameRoomMetadata } from "../types.js";
 import { LobbyMessages } from "../../../shared/protocol/messages.js";
 import { PlatformErrorCode, platformError } from "../../../shared/protocol/errors.js";
 import { RateLimiter } from "../utils/rateLimiter.js";
 import { recordError, recordMessage } from "../utils/metrics.js";
+import { authenticateToken, resolveClientAuth } from "../auth/resolveAuth.js";
 
 const createRoomLimiter = new RateLimiter(5, 60_000);
 const messageLimiter = new RateLimiter(60, 10_000);
@@ -49,7 +50,8 @@ export class LobbyRoom extends Room {
       }
 
       try {
-        const room = await this.createGameRoom(options);
+        const auth = resolveClientAuth(client);
+        const room = await this.createGameRoom(options, auth.username);
         client.send(LobbyMessages.ROOM_CREATED, {
           roomId: room.roomId,
           roomName: options.roomName.trim(),
@@ -69,8 +71,13 @@ export class LobbyRoom extends Room {
     });
   }
 
+  async onAuth(_client: Client, options: LobbyJoinOptions) {
+    return authenticateToken(options?.token);
+  }
+
   onJoin(client: Client) {
-    console.log(`[LobbyRoom] ${client.sessionId} joined lobby`);
+    const auth = client.auth as { username?: string } | undefined;
+    console.log(`[LobbyRoom] ${auth?.username ?? client.sessionId} joined lobby`);
     void this.sendRoomList(client);
   }
 
@@ -106,7 +113,8 @@ export class LobbyRoom extends Room {
       if (
         normalizedKeyword &&
         !metadata.roomName.toLowerCase().includes(normalizedKeyword) &&
-        !entry.roomId.toLowerCase().includes(normalizedKeyword)
+        !entry.roomId.toLowerCase().includes(normalizedKeyword) &&
+        !(metadata.ownerUsername ?? "").toLowerCase().includes(normalizedKeyword)
       ) {
         continue;
       }
@@ -120,13 +128,14 @@ export class LobbyRoom extends Room {
         maxClients: entry.maxClients,
         minPlayers: metadata.minPlayers,
         hasPassword: metadata.hasPassword,
+        ownerUsername: metadata.ownerUsername,
       });
     }
 
     return rooms.sort((a, b) => a.roomName.localeCompare(b.roomName));
   }
 
-  private async createGameRoom(options: CreateRoomOptions) {
+  private async createGameRoom(options: CreateRoomOptions, ownerUsername: string) {
     const roomName = (options.roomName ?? "").trim();
     const gameId = options.gameId ?? "";
     const password = (options.password ?? "").trim();
@@ -147,6 +156,7 @@ export class LobbyRoom extends Room {
       password: password || undefined,
       gameId: game.id,
       gameConfig,
+      ownerUsername,
     });
   }
 }

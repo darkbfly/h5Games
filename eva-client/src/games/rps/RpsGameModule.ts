@@ -50,7 +50,7 @@ export class RpsGameModule implements GameModule {
     statusEl.textContent = state.message || this.phaseText(state.phase);
     scoreEl.textContent = state.players
       .map((p) => {
-        const tag = p.sessionId === myId ? "我" : "对手";
+        const tag = p.sessionId === myId ? `${p.username}(我)` : p.username;
         return `${tag}: ${p.score}分 (${p.hasChosen ? "已选" : "未选"})`;
       })
       .join("  |  ");
@@ -65,12 +65,16 @@ export class RpsGameModule implements GameModule {
     }
 
     if (result && resultEl) {
+      const myPlayer = state.players.find((p) => p.sessionId === myId);
+      const oppPlayer = state.players.find((p) => p.sessionId !== myId);
       const myChoice = myId ? result.choices[myId] : null;
       const oppId = Object.keys(result.choices).find((id) => id !== myId);
       const oppChoice = oppId ? result.choices[oppId] : null;
       const myText = myChoice ? RPS_LABELS[myChoice] : "未出";
       const oppText = oppChoice ? RPS_LABELS[oppChoice] : "未出";
-      resultEl.textContent = `${result.message} | 我:${myText} 对手:${oppText}`;
+      const myName = myPlayer?.username ?? "我";
+      const oppName = oppPlayer?.username ?? "对手";
+      resultEl.textContent = `${result.message} | ${myName}:${myText} ${oppName}:${oppText}`;
     }
 
     if (state.phase === "finished" && state.winnerSessionId) {
