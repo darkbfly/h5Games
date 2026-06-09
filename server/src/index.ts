@@ -1,11 +1,12 @@
 import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
-import { Server } from "@colyseus/core";
+import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { monitor } from "@colyseus/monitor";
 import { LobbyRoom } from "./rooms/LobbyRoom.js";
 import { GameRoom } from "./rooms/GameRoom.js";
+import { buildMetrics } from "./utils/metrics.js";
 
 const PORT = Number(process.env.PORT ?? 2567);
 
@@ -13,8 +14,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+app.get("/health", async (_req, res) => {
+  const lobbyRooms = await matchMaker.query({ name: "lobby" });
+  const gameRooms = await matchMaker.query({ name: "game_room" });
+
+  const lobbyClients = lobbyRooms.reduce((sum, r) => sum + r.clients, 0);
+  const gameClients = gameRooms.reduce((sum, r) => sum + r.clients, 0);
+
+  res.json({
+    ok: true,
+    metrics: buildMetrics(lobbyClients, gameRooms.length, gameClients),
+  });
 });
 
 const httpServer = createServer(app);

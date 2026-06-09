@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx --test test/platform.test.ts"
+    "test": "tsx --test test/platform.test.ts test/load.test.ts",
+    "test:load": "tsx --test test/load.test.ts"
   },
   "dependencies": {
     "@colyseus/core": "^0.15.57",

@@ -2,12 +2,15 @@
   "name": "h5games",
   "version": "1.0.0",
   "private": true,
-  "description": "Cocos Creator game platform with Colyseus backend",
+  "description": "Eva.js game platform with Colyseus backend",
   "scripts": {
-    "server": "npm run dev --prefix server",
-    "server:build": "npm run build --prefix server",
-    "server:test": "npm test --prefix server",
-    "install:all": "yarn install --cwd server && yarn install --cwd client",
-    "test": "yarn test --cwd server"
+    "server": "yarn --cwd server dev",
+    "server:build": "yarn --cwd server build",
+    "server:test": "yarn --cwd server test",
+    "eva:dev": "yarn --cwd eva-client dev",
+    "eva:build": "yarn --cwd eva-client build",
+    "install:all": "yarn --cwd server install && yarn --cwd eva-client install && yarn --cwd client install",
+    "test": "yarn --cwd server test",
+    "test:load": "yarn --cwd server test:load"
   }
 }

@@ -2,6 +2,7 @@ import { Client, Room, ServerError } from "@colyseus/core";
 import { getGameById, validateGameConfig, type GameConfigValues } from "../gameCatalog.js";
 import { RockPaperScissorsController } from "../games/RockPaperScissorsController.js";
 import type { CreateRoomOptions, GameRoomMetadata, JoinRoomOptions } from "../types.js";
+const RECONNECT_SECONDS = 10;
 
 export class GameRoom extends Room {
   autoDispose = false;
@@ -48,7 +49,7 @@ export class GameRoom extends Room {
     this.setMetadata(metadata);
   }
 
-  async onAuth(client: Client, options: JoinRoomOptions) {
+  async onAuth(_client: Client, options: JoinRoomOptions) {
     if (!this.roomPassword) {
       return true;
     }
@@ -67,8 +68,19 @@ export class GameRoom extends Room {
     this.rps?.sendStateTo(client);
   }
 
-  onLeave(client: Client) {
-    console.log(`[GameRoom] ${client.sessionId} left ${this.roomId}`);
+  async onLeave(client: Client, consented: boolean) {
+    console.log(`[GameRoom] ${client.sessionId} left ${this.roomId} (consented=${consented})`);
+
+    if (!consented) {
+      try {
+        await this.allowReconnection(client, RECONNECT_SECONDS);
+        console.log(`[GameRoom] ${client.sessionId} reconnected`);
+        return;
+      } catch {
+        console.log(`[GameRoom] ${client.sessionId} reconnection expired`);
+      }
+    }
+
     this.rps?.onLeave(client);
   }
 

@@ -1,0 +1,22 @@
+{
+  "name": "h5games-eva-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@eva/eva.js": "^1.2.1",
+    "@eva/plugin-renderer": "^1.2.1",
+    "@eva/plugin-renderer-graphics": "^1.2.1",
+    "@eva/plugin-renderer-text": "^1.2.1",
+    "colyseus.js": "^0.15.26"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}

@@ -1,38 +1,17 @@
 import type { Client, Room } from "@colyseus/core";
 import type { GameConfigValues } from "../gameCatalog.js";
-
-export type RpsChoice = "rock" | "paper" | "scissors";
-export type RpsPhase = "waiting" | "playing" | "round_result" | "finished";
+import type {
+  RpsChoice,
+  RpsPhase,
+  RpsRoundResultPayload,
+  RpsStatePayload,
+} from "../types.js";
+import { CommonMessages, RpsMessages } from "../../../shared/protocol/messages.js";
+import { PlatformErrorCode, platformError } from "../../../shared/protocol/errors.js";
+import { recordError, recordMessage } from "../utils/metrics.js";
 
 const CHOICE_SET = new Set<RpsChoice>(["rock", "paper", "scissors"]);
 const ROUND_RESULT_DELAY_MS = 1500;
-
-export interface RpsPlayerState {
-  sessionId: string;
-  score: number;
-  hasChosen: boolean;
-}
-
-export interface RpsStatePayload {
-  gameId: "rock-paper-scissors";
-  phase: RpsPhase;
-  round: number;
-  choiceTimeSeconds: number;
-  winningScore: number;
-  deadlineMs: number;
-  players: RpsPlayerState[];
-  winnerSessionId: string | null;
-  message: string;
-}
-
-export interface RpsRoundResultPayload {
-  round: number;
-  choices: Record<string, RpsChoice | null>;
-  roundWinnerSessionId: string | null;
-  scores: Record<string, number>;
-  isDraw: boolean;
-  message: string;
-}
 
 export class RockPaperScissorsController {
   private readonly choiceTimeSeconds: number;
@@ -53,7 +32,8 @@ export class RockPaperScissorsController {
   ) {
     this.choiceTimeSeconds = config.choiceTimeSeconds;
     this.winningScore = config.winningScore;
-    this.room.onMessage("rps_choose", (client, data: { choice?: string }) => {
+    this.room.onMessage(RpsMessages.CHOOSE, (client, data: { choice?: string }) => {
+      recordMessage();
       this.handleChoose(client, data?.choice);
     });
   }
@@ -63,7 +43,8 @@ export class RockPaperScissorsController {
       return;
     }
     if (this.playerOrder.length >= 2) {
-      client.send("error", { message: "房间已满" });
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.ROOM_FULL, "房间已满"));
       return;
     }
 
@@ -95,7 +76,7 @@ export class RockPaperScissorsController {
   }
 
   sendStateTo(client: Client) {
-    client.send("rps_state", this.buildStatePayload());
+    client.send(RpsMessages.STATE, this.buildStatePayload());
   }
 
   dispose() {
@@ -104,23 +85,27 @@ export class RockPaperScissorsController {
 
   private handleChoose(client: Client, rawChoice?: string) {
     if (this.phase !== "playing") {
-      client.send("error", { message: "当前不可选择" });
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.CANNOT_CHOOSE_NOW, "当前不可选择"));
       return;
     }
 
     if (!this.playerOrder.includes(client.sessionId)) {
-      client.send("error", { message: "你不是本局玩家" });
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.NOT_IN_GAME, "你不是本局玩家"));
       return;
     }
 
     if (this.choices.has(client.sessionId)) {
-      client.send("error", { message: "本回合已选择" });
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.ALREADY_CHOSEN, "本回合已选择"));
       return;
     }
 
     const choice = rawChoice as RpsChoice;
     if (!CHOICE_SET.has(choice)) {
-      client.send("error", { message: "无效的选择" });
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.INVALID_CHOICE, "无效的选择"));
       return;
     }
 
@@ -192,7 +177,7 @@ export class RockPaperScissorsController {
       scoresObj[id] = this.scores.get(id) ?? 0;
     }
 
-    this.room.broadcast("rps_round_result", {
+    this.room.broadcast(RpsMessages.ROUND_RESULT, {
       round: this.round,
       choices: { [p1]: c1, [p2]: c2 },
       roundWinnerSessionId: roundWinner,
@@ -268,7 +253,7 @@ export class RockPaperScissorsController {
   private broadcastState(message: string) {
     const payload = this.buildStatePayload();
     payload.message = message;
-    this.room.broadcast("rps_state", payload);
+    this.room.broadcast(RpsMessages.STATE, payload);
   }
 
   private clearRoundTimer() {

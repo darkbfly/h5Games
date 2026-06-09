@@ -55,7 +55,7 @@
     "@colyseus/core" "^0.15.57"
     ioredis "^5.3.2"
 
-"@colyseus/schema@^2.0.4":
+"@colyseus/schema@^2.0.36", "@colyseus/schema@^2.0.4":
   version "2.0.37"
   resolved "https://registry.npmmirror.com/@colyseus/schema/-/schema-2.0.37.tgz#4bf1509b183133ae3a827af897974d8236874d01"
   integrity sha512-+WXEux9DMSaTz9hZKabl6LBuzsxzt9EvOwhXJ/G4rPCaaVkJ+iLxRsq8VbL2ZCx18E/uQH6nLaNIQVqH9wEt8w==
