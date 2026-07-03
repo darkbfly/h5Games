@@ -13,6 +13,7 @@ import type {
   RoomsListPayload,
   RpsRoundResultPayload,
   RpsStatePayload,
+  KickedPayload,
 } from "@shared/protocol/types.js";
 import type { StateStore } from "../state/StateStore.js";
 
@@ -26,6 +27,10 @@ export class NetworkService {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private boundLobbyHandlers = false;
+  private boundGameHandlers = false;
+  private roomCreatedHandler: ((data: RoomCreatedPayload) => void) | null = null;
+  private kickedHandler: (() => void) | null = null;
+  private handlingKick = false;
 
   constructor(
     private readonly store: StateStore,
@@ -121,8 +126,9 @@ export class NetworkService {
 
     this.lobbyRoom.onMessage(LobbyMessages.ROOM_CREATED, (data: RoomCreatedPayload) => {
       this.store.patch({
-        statusMessage: `房间「${data.roomName}」创建成功，ID: ${data.roomId}`,
+        statusMessage: `房间「${data.roomName}」创建成功`,
       });
+      this.roomCreatedHandler?.(data);
     });
 
     this.lobbyRoom.onMessage(LobbyMessages.ROOM_LIST_CHANGED, () => {
@@ -178,6 +184,14 @@ export class NetworkService {
     this.lobbyRoom?.send(LobbyMessages.SEARCH_ROOMS, { keyword });
   }
 
+  setRoomCreatedHandler(handler: ((data: RoomCreatedPayload) => void) | null): void {
+    this.roomCreatedHandler = handler;
+  }
+
+  setKickedHandler(handler: (() => void) | null): void {
+    this.kickedHandler = handler;
+  }
+
   createRoom(options: CreateRoomOptions): void {
     const roomName = options.roomName.trim();
     if (!roomName) {
@@ -213,7 +227,8 @@ export class NetworkService {
   }
 
   private bindGameHandlers(): void {
-    if (!this.gameRoom) return;
+    if (!this.gameRoom || this.boundGameHandlers) return;
+    this.boundGameHandlers = true;
 
     this.gameRoom.onMessage(RpsMessages.STATE, (data: RpsStatePayload) => {
       this.store.patch({ rpsState: data });
@@ -227,8 +242,17 @@ export class NetworkService {
       this.store.patch({ statusMessage: data.message });
     });
 
+    this.gameRoom.onMessage(CommonMessages.KICKED, (data: KickedPayload) => {
+      if (this.handlingKick) return;
+      this.handlingKick = true;
+      this.store.patch({ statusMessage: data.message ?? "你已被房主移出房间" });
+      this.kickedHandler?.();
+    });
+
     this.gameRoom.onLeave(() => {
       this.gameRoom = null;
+      this.boundGameHandlers = false;
+      this.handlingKick = false;
     });
   }
 
@@ -236,11 +260,21 @@ export class NetworkService {
     this.gameRoom?.send(RpsMessages.CHOOSE, { choice });
   }
 
+  sendRpsReady(): void {
+    this.gameRoom?.send(RpsMessages.READY, {});
+  }
+
+  sendKickPlayer(sessionId: string): void {
+    this.gameRoom?.send(CommonMessages.KICK_PLAYER, { sessionId });
+  }
+
   async leaveGameRoom(): Promise<void> {
     if (this.gameRoom) {
       await this.gameRoom.leave();
       this.gameRoom = null;
     }
+    this.boundGameHandlers = false;
+    this.handlingKick = false;
     this.store.resetGameState();
   }
 
@@ -250,6 +284,8 @@ export class NetworkService {
       this.reconnectTimer = null;
     }
 
+    this.roomCreatedHandler = null;
+    this.kickedHandler = null;
     void this.gameRoom?.leave();
     void this.lobbyRoom?.leave();
     this.gameRoom = null;

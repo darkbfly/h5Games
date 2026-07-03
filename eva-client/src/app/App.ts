@@ -1,4 +1,4 @@
-import type { RoomListItem } from "@shared/protocol/types.js";
+import type { CreateRoomOptions, RoomListItem } from "@shared/protocol/types.js";
 import { StateStore } from "../state/StateStore.js";
 import { NetworkService } from "../network/NetworkService.js";
 import { AuthScene } from "../scenes/AuthScene.js";
@@ -22,6 +22,7 @@ export class App {
   private lobbyScene: LobbyScene | null = null;
   private roomScene: RoomScene | null = null;
   private gameScene: ActiveGameScene | null = null;
+  private pendingCreatePassword?: string;
 
   constructor() {
     const container = document.querySelector("#game-container");
@@ -69,14 +70,42 @@ export class App {
     this.loadingScene?.dispose();
     this.loadingScene = null;
 
+    this.network.setRoomCreatedHandler((data) => {
+      void this.handleRoomCreated(data);
+    });
+
     this.lobbyScene = new LobbyScene(
       this.store,
       this.network,
       this.overlay,
       (room, password) => void this.handleJoinRoom(room, password),
-      () => this.logout()
+      () => this.logout(),
+      (options) => this.handleCreateRoom(options)
     );
     this.lobbyScene.start();
+  }
+
+  private handleCreateRoom(options: CreateRoomOptions): void {
+    this.pendingCreatePassword = options.password;
+    this.network.createRoom(options);
+  }
+
+  private handleRoomCreated(data: { roomId: string; roomName: string; gameId: string }): void {
+    const game = this.store.get().games.find((g) => g.id === data.gameId);
+    const room: RoomListItem = {
+      roomId: data.roomId,
+      roomName: data.roomName,
+      gameId: data.gameId,
+      gameName: game?.name ?? data.gameId,
+      clients: 1,
+      maxClients: game?.maxPlayers ?? 2,
+      minPlayers: game?.minPlayers ?? 2,
+      hasPassword: !!this.pendingCreatePassword,
+      ownerUsername: this.store.get().currentUser?.username,
+    };
+    const password = this.pendingCreatePassword;
+    this.pendingCreatePassword = undefined;
+    void this.handleJoinRoom(room, password);
   }
 
   private async handleJoinRoom(room: RoomListItem, password?: string): Promise<void> {
@@ -87,36 +116,79 @@ export class App {
       return;
     }
 
+    this.network.setRoomCreatedHandler(null);
     this.lobbyScene?.dispose();
     this.lobbyScene = null;
 
-    this.roomScene = new RoomScene(this.store, this.overlay, room);
+    this.roomScene = new RoomScene(
+      this.store,
+      this.overlay,
+      room,
+      () => void this.exitRoom(),
+      () => this.network.sendRpsReady(),
+      (sessionId) => this.network.sendKickPlayer(sessionId),
+      () => void this.enterGame(room.gameId)
+    );
     this.roomScene.start();
 
-    try {
-      const gameRoom = await this.network.joinRoom(room.roomId, password);
-      this.roomScene.dispose();
-      this.roomScene = null;
+    this.network.setKickedHandler(() => void this.handleKicked());
 
-      const { GameScene } = await import("../scenes/GameScene.js");
-      this.gameScene = new GameScene(
-        this.store,
-        this.network,
-        this.container,
-        this.overlay,
-        () => void this.exitToLobby()
-      );
-      this.gameScene.start(room.gameId, gameRoom);
+    try {
+      await this.network.joinRoom(room.roomId, password);
+      this.roomScene.setConnected();
     } catch (err) {
       const message = err instanceof Error ? err.message : "加入失败";
       this.store.patch({ statusMessage: message });
+      this.network.setKickedHandler(null);
       this.roomScene?.dispose();
       this.roomScene = null;
       this.showLobby();
     }
   }
 
+  private async handleKicked(): Promise<void> {
+    this.network.setKickedHandler(null);
+    this.roomScene?.dispose();
+    this.roomScene = null;
+    this.gameScene?.dispose();
+    this.gameScene = null;
+    await this.network.leaveGameRoom();
+    this.store.resetGameState();
+    this.showLobby();
+    this.network.requestRoomList();
+  }
+
+  private async enterGame(gameId: string): Promise<void> {
+    if (this.gameScene) return;
+
+    const gameRoom = this.network.getGameRoom();
+    if (!gameRoom) return;
+
+    this.roomScene?.dispose();
+    this.roomScene = null;
+
+    const { GameScene } = await import("../scenes/GameScene.js");
+    this.gameScene = new GameScene(
+      this.store,
+      this.network,
+      this.container,
+      this.overlay,
+      () => void this.exitToLobby()
+    );
+    this.gameScene.start(gameId, gameRoom);
+  }
+
+  private async exitRoom(): Promise<void> {
+    this.network.setKickedHandler(null);
+    this.roomScene?.dispose();
+    this.roomScene = null;
+    await this.network.leaveGameRoom();
+    this.showLobby();
+    this.network.requestRoomList();
+  }
+
   private async exitToLobby(): Promise<void> {
+    this.network.setKickedHandler(null);
     this.gameScene?.dispose();
     this.gameScene = null;
     await this.network.leaveGameRoom();
@@ -126,6 +198,8 @@ export class App {
   }
 
   private logout(): void {
+    this.network.setRoomCreatedHandler(null);
+    this.pendingCreatePassword = undefined;
     this.gameScene?.dispose();
     this.gameScene = null;
     this.roomScene?.dispose();

@@ -8,3 +8,8 @@ profiles/
 *.log
 .DS_Store
 Thumbs.db
+
+# TypeScript emit artifacts (source is .ts)
+eva-client/src/**/*.js
+shared/**/*.js
+!shared/gameCatalog.js

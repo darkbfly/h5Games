@@ -53,3 +53,15 @@ export async function joinGameRoom(
 ) {
   return client.joinById(roomId, { token, password });
 }
+
+export function sendRpsReady(room: { send: (type: string, data: object) => void }): void {
+  room.send("rps_ready", {});
+}
+
+export async function readyAllPlayers(
+  rooms: Array<{ send: (type: string, data: object) => void }>
+): Promise<void> {
+  for (const room of rooms) {
+    sendRpsReady(room);
+  }
+}

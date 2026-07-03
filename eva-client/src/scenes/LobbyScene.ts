@@ -1,7 +1,8 @@
 import { getDefaultGameConfig } from "@shared/gameCatalog.js";
-import type { GameDefinition, RoomListItem } from "@shared/protocol/types.js";
+import type { CreateRoomOptions, GameDefinition, RoomListItem } from "@shared/protocol/types.js";
 import type { NetworkService } from "../network/NetworkService.js";
 import type { StateStore } from "../state/StateStore.js";
+import { escapeHtml } from "../utils/escapeHtml.js";
 
 export class LobbyScene {
   private unsubscribe: (() => void) | null = null;
@@ -11,7 +12,8 @@ export class LobbyScene {
     private readonly network: NetworkService,
     private readonly overlay: HTMLElement,
     private readonly onJoinGame: (room: RoomListItem, password?: string) => void,
-    private readonly onLogout: () => void
+    private readonly onLogout: () => void,
+    private readonly onCreateRoom: (options: CreateRoomOptions) => void
   ) {}
 
   start(): void {
@@ -33,14 +35,16 @@ export class LobbyScene {
 
   private render(): void {
     const state = this.store.get();
+    const username = escapeHtml(state.currentUser?.username ?? "玩家");
+    const status = escapeHtml(state.statusMessage);
     this.overlay.innerHTML = `
       <div class="lobby-shell">
         <aside class="lobby-sidebar">
           <div>
             <p class="eyebrow">H5 Games</p>
             <h1>游戏大厅</h1>
-            <div class="user-badge" id="current-user">欢迎，${state.currentUser?.username ?? "玩家"}</div>
-            <div class="status-bar" id="lobby-status">${state.statusMessage}</div>
+            <div class="user-badge" id="current-user">欢迎，${username}</div>
+            <div class="status-bar" id="lobby-status">${status}</div>
           </div>
 
           <button id="btn-toggle-create" class="create-game-button">创建游戏</button>
@@ -172,12 +176,12 @@ export class LobbyScene {
     list.innerHTML = rooms
       .map(
         (r) => `
-        <li class="room-item" data-room-id="${r.roomId}">
+        <li class="room-item" data-room-id="${escapeHtml(r.roomId)}">
           <div>
-            <strong>${r.roomName}</strong>
-            <div class="room-meta">${r.gameName} | 房主 ${r.ownerUsername ?? "未知"} | ${r.clients}/${r.maxClients}人 ${r.hasPassword ? "🔒" : ""}</div>
+            <strong>${escapeHtml(r.roomName)}</strong>
+            <div class="room-meta">${escapeHtml(r.gameName)} | 房主 ${escapeHtml(r.ownerUsername ?? "未知")} | ${r.clients}/${r.maxClients}人 ${r.hasPassword ? "🔒" : ""}</div>
           </div>
-          <button class="secondary" data-join="${r.roomId}">加入</button>
+          <button class="secondary" data-join="${escapeHtml(r.roomId)}">加入</button>
         </li>
       `
       )
@@ -204,7 +208,7 @@ export class LobbyScene {
     });
 
     try {
-      this.network.createRoom({
+      this.onCreateRoom({
         roomName,
         password: password || undefined,
         gameId,

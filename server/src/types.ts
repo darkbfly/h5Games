@@ -15,4 +15,6 @@ export type {
   RpsStatePayload,
   RpsRoundResultPayload,
   RpsChoosePayload,
+  KickPlayerPayload,
+  KickedPayload,
 } from "../../shared/protocol/types.js";

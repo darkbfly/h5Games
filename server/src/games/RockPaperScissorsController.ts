@@ -9,6 +9,7 @@ import type {
 import { CommonMessages, RpsMessages } from "../../../shared/protocol/messages.js";
 import { PlatformErrorCode, platformError } from "../../../shared/protocol/errors.js";
 import { recordError, recordMessage } from "../utils/metrics.js";
+import { RateLimiter } from "../utils/rateLimiter.js";
 
 const CHOICE_SET = new Set<RpsChoice>(["rock", "paper", "scissors"]);
 const ROUND_RESULT_DELAY_MS = 1500;
@@ -16,6 +17,9 @@ const ROUND_RESULT_DELAY_MS = 1500;
 export class RockPaperScissorsController {
   private readonly choiceTimeSeconds: number;
   private readonly winningScore: number;
+  private readonly minPlayers: number;
+  private readonly getOwnerSessionId: () => string | null;
+  private readonly messageLimiter = new RateLimiter(30, 10_000);
   private phase: RpsPhase = "waiting";
   private round = 0;
   private deadlineMs = 0;
@@ -24,18 +28,26 @@ export class RockPaperScissorsController {
   private readonly usernames = new Map<string, string>();
   private readonly scores = new Map<string, number>();
   private readonly choices = new Map<string, RpsChoice>();
+  private readonly readyPlayers = new Set<string>();
   private roundTimer: ReturnType<typeof setTimeout> | null = null;
   private nextRoundTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly room: Room,
-    config: GameConfigValues
+    config: GameConfigValues,
+    options: { minPlayers: number; getOwnerSessionId: () => string | null }
   ) {
     this.choiceTimeSeconds = config.choiceTimeSeconds;
     this.winningScore = config.winningScore;
+    this.minPlayers = options.minPlayers;
+    this.getOwnerSessionId = options.getOwnerSessionId;
     this.room.onMessage(RpsMessages.CHOOSE, (client, data: { choice?: string }) => {
       recordMessage();
       this.handleChoose(client, data?.choice);
+    });
+    this.room.onMessage(RpsMessages.READY, (client) => {
+      recordMessage();
+      this.handleReady(client);
     });
   }
 
@@ -56,10 +68,10 @@ export class RockPaperScissorsController {
     this.usernames.set(client.sessionId, username);
     this.scores.set(client.sessionId, 0);
 
-    if (this.playerOrder.length === 2) {
-      this.startRound();
+    this.phase = "waiting";
+    if (this.playerOrder.length >= this.minPlayers) {
+      this.broadcastState("请所有玩家点击准备");
     } else {
-      this.phase = "waiting";
       this.broadcastState("等待另一位玩家加入");
     }
   }
@@ -73,11 +85,15 @@ export class RockPaperScissorsController {
     this.usernames.delete(client.sessionId);
     this.scores.delete(client.sessionId);
     this.choices.delete(client.sessionId);
+    this.readyPlayers.delete(client.sessionId);
 
     if (this.phase !== "finished") {
       this.phase = "waiting";
       this.winnerSessionId = null;
-      this.broadcastState("对手已离开，等待新玩家");
+      this.readyPlayers.clear();
+      this.broadcastState(
+        this.playerOrder.length >= this.minPlayers ? "对手已离开，请重新准备" : "对手已离开，等待新玩家"
+      );
     }
   }
 
@@ -85,11 +101,64 @@ export class RockPaperScissorsController {
     client.send(RpsMessages.STATE, this.buildStatePayload());
   }
 
+  canKick(): boolean {
+    return this.phase === "waiting";
+  }
+
+  hasPlayer(sessionId: string): boolean {
+    return this.playerOrder.includes(sessionId);
+  }
+
   dispose() {
     this.clearTimers();
   }
 
+  private handleReady(client: Client) {
+    if (!this.checkMessageRate(client)) return;
+
+    if (this.phase !== "waiting") {
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.CANNOT_READY_NOW, "当前不可准备"));
+      return;
+    }
+
+    if (!this.playerOrder.includes(client.sessionId)) {
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.NOT_IN_GAME, "你不是本局玩家"));
+      return;
+    }
+
+    if (this.readyPlayers.has(client.sessionId)) {
+      recordError();
+      client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.ALREADY_READY, "你已经准备好了"));
+      return;
+    }
+
+    this.readyPlayers.add(client.sessionId);
+    const username = this.usernames.get(client.sessionId) ?? client.sessionId.slice(0, 6);
+    this.tryStartIfAllReady(`${username} 已准备`);
+  }
+
+  private tryStartIfAllReady(statusMessage: string) {
+    if (this.playerOrder.length < this.minPlayers) {
+      this.broadcastState(statusMessage);
+      return;
+    }
+
+    const allReady = this.playerOrder.every((id) => this.readyPlayers.has(id));
+    if (allReady) {
+      this.readyPlayers.clear();
+      this.startRound();
+      return;
+    }
+
+    const readyCount = this.readyPlayers.size;
+    this.broadcastState(`${statusMessage}（${readyCount}/${this.playerOrder.length} 人已准备）`);
+  }
+
   private handleChoose(client: Client, rawChoice?: string) {
+    if (!this.checkMessageRate(client)) return;
+
     if (this.phase !== "playing") {
       recordError();
       client.send(CommonMessages.ERROR, platformError(PlatformErrorCode.CANNOT_CHOOSE_NOW, "当前不可选择"));
@@ -251,10 +320,24 @@ export class RockPaperScissorsController {
         username: this.usernames.get(sessionId) ?? sessionId.slice(0, 6),
         score: this.scores.get(sessionId) ?? 0,
         hasChosen: this.choices.has(sessionId),
+        isReady: this.readyPlayers.has(sessionId),
       })),
       winnerSessionId: this.winnerSessionId,
+      ownerSessionId: this.getOwnerSessionId(),
       message: "",
     };
+  }
+
+  private checkMessageRate(client: Client): boolean {
+    if (this.messageLimiter.tryConsume(client.sessionId)) {
+      return true;
+    }
+    recordError();
+    client.send(CommonMessages.ERROR, platformError(
+      PlatformErrorCode.RATE_LIMITED,
+      "操作过于频繁，请稍后再试"
+    ));
+    return false;
   }
 
   private broadcastState(message: string) {

@@ -1,5 +1,6 @@
 import type { NetworkService } from "../network/NetworkService.js";
 import type { StateStore } from "../state/StateStore.js";
+import { escapeHtml } from "../utils/escapeHtml.js";
 
 export class AuthScene {
   constructor(
@@ -24,7 +25,7 @@ export class AuthScene {
         <div class="auth-card">
           <p class="eyebrow">H5 Games</p>
           <h1>${isLogin ? "登录" : "注册"}</h1>
-          <div class="status-bar" id="auth-status">${this.store.get().statusMessage}</div>
+          <div class="status-bar" id="auth-status">${escapeHtml(this.store.get().statusMessage)}</div>
           <div class="form-row">
             <label>用户名</label>
             <input id="auth-username" placeholder="至少3个字符" autocomplete="username" />

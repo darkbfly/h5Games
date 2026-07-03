@@ -14,11 +14,14 @@ export const LobbyMessages = {
 /** 通用错误消息 */
 export const CommonMessages = {
   ERROR: "error",
+  KICK_PLAYER: "kick_player",
+  KICKED: "kicked",
 } as const;
 
 /** 锤子剪刀布消息 */
 export const RpsMessages = {
   CHOOSE: "rps_choose",
+  READY: "rps_ready",
   STATE: "rps_state",
   ROUND_RESULT: "rps_round_result",
 } as const;

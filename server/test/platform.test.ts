@@ -10,6 +10,7 @@ import {
   loginUser,
   joinLobby,
   joinGameRoom,
+  readyAllPlayers,
 } from "./authHelpers.js";
 
 const SERVER_PORT = process.env.TEST_PORT ?? "2588";
@@ -331,6 +332,85 @@ test("rejects invalid rock-paper-scissors config", async () => {
   await lobby.leave();
 });
 
+test("room owner can kick player while waiting", async () => {
+  const ownerAuth = await registerUser(`kick_owner_${Date.now()}`, "password123");
+  const guestAuth = await registerUser(`kick_guest_${Date.now()}`, "password123");
+
+  const ownerLobbyClient = new Client(SERVER_URL);
+  const ownerLobby = await joinLobby(ownerLobbyClient, ownerAuth.token);
+  const created = await createRpsRoom(ownerLobby, { choiceTimeSeconds: 3, winningScore: 1 });
+  await ownerLobby.leave();
+
+  const ownerClient = new Client(SERVER_URL);
+  const guestClient = new Client(SERVER_URL);
+  const ownerRoom = await joinGameRoom(ownerClient, created.roomId, ownerAuth.token);
+  const guestRoom = await joinGameRoom(guestClient, created.roomId, guestAuth.token);
+
+  const kickedPromise = new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("kicked timeout")), 5000);
+    guestRoom.onMessage("kicked", (data: { message: string }) => {
+      clearTimeout(timeout);
+      resolve(data.message);
+    });
+  });
+
+  ownerRoom.send("kick_player", { sessionId: guestRoom.sessionId });
+
+  const kickMessage = await kickedPromise;
+  assert.match(kickMessage, /移出房间/);
+
+  const ownerState = await new Promise<{
+    players: { username: string }[];
+    phase: string;
+  }>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("owner state timeout")), 5000);
+    ownerRoom.onMessage("rps_state", (data: {
+      players: { username: string }[];
+      phase: string;
+    }) => {
+      if (data.players.length === 1) {
+        clearTimeout(timeout);
+        resolve(data);
+      }
+    });
+  });
+
+  assert.equal(ownerState.players.length, 1);
+  assert.equal(ownerState.phase, "waiting");
+  assert.equal(ownerState.players[0]?.username, ownerAuth.user.username);
+
+  await ownerRoom.leave();
+});
+
+test("non-owner cannot kick player", async () => {
+  const ownerAuth = await registerUser(`kick_owner2_${Date.now()}`, "password123");
+  const guestAuth = await registerUser(`kick_guest2_${Date.now()}`, "password123");
+
+  const ownerLobbyClient = new Client(SERVER_URL);
+  const ownerLobby = await joinLobby(ownerLobbyClient, ownerAuth.token);
+  const created = await createRpsRoom(ownerLobby, { choiceTimeSeconds: 3, winningScore: 1 });
+  await ownerLobby.leave();
+
+  const ownerClient = new Client(SERVER_URL);
+  const guestClient = new Client(SERVER_URL);
+  const ownerRoom = await joinGameRoom(ownerClient, created.roomId, ownerAuth.token);
+  const guestRoom = await joinGameRoom(guestClient, created.roomId, guestAuth.token);
+
+  const errorMessage = await new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("kick error timeout")), 5000);
+    guestRoom.onMessage("error", (data: { message: string }) => {
+      clearTimeout(timeout);
+      resolve(data.message);
+    });
+    guestRoom.send("kick_player", { sessionId: ownerRoom.sessionId });
+  });
+
+  assert.match(errorMessage, /房主/);
+
+  await ownerRoom.leave();
+  await guestRoom.leave();
+});
+
 test("plays rock-paper-scissors round and includes usernames", async () => {
   const p1Auth = await registerUser(`rps_p1_${Date.now()}`, "password123");
   const p2Auth = await registerUser(`rps_p2_${Date.now()}`, "password123");
@@ -344,6 +424,8 @@ test("plays rock-paper-scissors round and includes usernames", async () => {
   const p2 = new Client(SERVER_URL);
   const room1 = await joinGameRoom(p1, created.roomId, p1Auth.token);
   const room2 = await joinGameRoom(p2, created.roomId, p2Auth.token);
+
+  await readyAllPlayers([room1, room2]);
 
   const waitPlaying = (room: typeof room1) =>
     new Promise<void>((resolve, reject) => {
@@ -403,6 +485,7 @@ test("timeout causes missing player to lose the round", async () => {
   const room1 = await joinGameRoom(p1, created.roomId, p1Auth.token);
   const room2 = await joinGameRoom(p2, created.roomId, p2Auth.token);
 
+  await readyAllPlayers([room1, room2]);
   await delay(500);
 
   room1.send("rps_choose", { choice: "paper" });

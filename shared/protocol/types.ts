@@ -76,6 +76,7 @@ export interface RpsPlayerState {
   username: string;
   score: number;
   hasChosen: boolean;
+  isReady: boolean;
 }
 
 export interface RpsStatePayload {
@@ -87,6 +88,7 @@ export interface RpsStatePayload {
   deadlineMs: number;
   players: RpsPlayerState[];
   winnerSessionId: string | null;
+  ownerSessionId: string | null;
   message: string;
 }
 
@@ -101,6 +103,14 @@ export interface RpsRoundResultPayload {
 
 export interface RpsChoosePayload {
   choice?: string;
+}
+
+export interface KickPlayerPayload {
+  sessionId: string;
+}
+
+export interface KickedPayload {
+  message: string;
 }
 
 export type { GameConfigValues, GameDefinition };
