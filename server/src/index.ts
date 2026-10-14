@@ -62,6 +62,18 @@ app.post("/auth/login", (req, res) => {
   }
 });
 
+app.get("/auth/verify", (req, res) => {
+  const token =
+    req.headers.authorization?.replace(/^Bearer\s+/i, "") ||
+    String(req.query.token ?? "");
+  const session = authService.verifyToken(token);
+  if (!session) {
+    res.status(401).json({ code: "UNAUTHORIZED", message: "未登录或登录已失效" });
+    return;
+  }
+  res.json({ ok: true, user: { id: session.userId, username: session.username } });
+});
+
 const httpServer = createServer(app);
 
 const gameServer = new Server({

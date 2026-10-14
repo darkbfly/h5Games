@@ -9,8 +9,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    headers: {
+      "Cache-Control": "no-store",
+    },
     proxy: {
       "/health": "http://localhost:2567",
+      "/auth": "http://localhost:2567",
     },
   },
 });

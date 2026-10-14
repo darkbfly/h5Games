@@ -41,20 +41,23 @@ function loadStoredAuth(): { token: string; user: UserProfile } | null {
   }
 }
 
+export function peekStoredAuth(): { token: string; user: UserProfile } | null {
+  return loadStoredAuth();
+}
+
 export class StateStore {
   private state: AppState;
 
   private listeners = new Set<Listener>();
 
   constructor() {
-    const stored = loadStoredAuth();
     this.state = {
-      scene: stored ? "loading" : "auth",
-      statusMessage: stored ? "正在连接..." : "请登录或注册",
+      scene: "auth",
+      statusMessage: "请登录或注册",
       serverUrl: DEFAULT_SERVER,
       connected: false,
-      authToken: stored?.token ?? null,
-      currentUser: stored?.user ?? null,
+      authToken: null,
+      currentUser: null,
       games: [],
       rooms: [],
       currentRoomId: null,

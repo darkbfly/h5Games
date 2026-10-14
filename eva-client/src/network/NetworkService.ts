@@ -31,6 +31,7 @@ export class NetworkService {
   private roomCreatedHandler: ((data: RoomCreatedPayload) => void) | null = null;
   private kickedHandler: (() => void) | null = null;
   private handlingKick = false;
+  private authExpiredHandler: (() => void) | null = null;
 
   constructor(
     private readonly store: StateStore,
@@ -41,6 +42,9 @@ export class NetworkService {
   }
 
   private getHttpBaseUrl(): string {
+    if (import.meta.env.DEV && typeof window !== "undefined") {
+      return window.location.origin;
+    }
     return this.store.get().serverUrl.replace(/^ws/, "http").replace(/\/$/, "");
   }
 
@@ -91,6 +95,24 @@ export class NetworkService {
     return data as AuthResponsePayload;
   }
 
+  async verifyToken(token: string): Promise<boolean> {
+    if (!token.trim()) return false;
+    try {
+      const res = await fetch(`${this.getHttpBaseUrl()}/auth/verify`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async verifySession(): Promise<boolean> {
+    const token = this.store.get().authToken;
+    if (!token) return false;
+    return this.verifyToken(token);
+  }
+
   async connectLobby(): Promise<void> {
     if (this.lobbyRoom) {
       return;
@@ -108,6 +130,7 @@ export class NetworkService {
       this.bindLobbyHandlers();
       this.store.patch({ connected: true, statusMessage: "已连接大厅" });
     } catch (err) {
+      this.handleAuthFailure(err);
       throw new Error(this.toUserMessage(err, "连接大厅失败"));
     }
   }
@@ -167,6 +190,7 @@ export class NetworkService {
         this.requestGames();
         this.requestRoomList();
       } catch {
+        if (!this.store.get().authToken) return;
         this.scheduleLobbyReconnect();
       }
     }, RECONNECT_DELAY_MS);
@@ -190,6 +214,10 @@ export class NetworkService {
 
   setKickedHandler(handler: (() => void) | null): void {
     this.kickedHandler = handler;
+  }
+
+  setAuthExpiredHandler(handler: (() => void) | null): void {
+    this.authExpiredHandler = handler;
   }
 
   createRoom(options: CreateRoomOptions): void {
@@ -222,6 +250,7 @@ export class NetworkService {
       });
       return this.gameRoom;
     } catch (err) {
+      this.handleAuthFailure(err);
       throw new Error(this.toUserMessage(err, "加入房间失败"));
     }
   }
@@ -299,6 +328,47 @@ export class NetworkService {
 
   getGameRoom(): Room | null {
     return this.gameRoom;
+  }
+
+  private isAuthError(err: unknown): boolean {
+    if (err && typeof err === "object" && "code" in err && (err as { code: number }).code === 401) {
+      return true;
+    }
+    if (!(err instanceof Error)) return false;
+    return /401|未登录|登录已失效|UNAUTHORIZED/i.test(err.message);
+  }
+
+  private handleAuthFailure(err: unknown): void {
+    if (!this.isAuthError(err)) return;
+    this.invalidateSession();
+  }
+
+  private invalidateSession(message = "登录已失效，请重新登录"): void {
+    const hadToken = !!this.store.get().authToken;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.reconnectAttempts = 0;
+    this.roomCreatedHandler = null;
+    this.kickedHandler = null;
+    void this.gameRoom?.leave();
+    void this.lobbyRoom?.leave();
+    this.gameRoom = null;
+    this.lobbyRoom = null;
+    this.boundLobbyHandlers = false;
+    this.boundGameHandlers = false;
+    this.handlingKick = false;
+    this.store.patch({ connected: false, rooms: [], games: [] });
+    this.store.resetGameState();
+
+    if (hadToken) {
+      this.store.clearAuth();
+    }
+    this.store.patch({ statusMessage: message });
+    this.authExpiredHandler?.();
   }
 
   private toUserMessage(err: unknown, fallback: string): string {

@@ -6,7 +6,8 @@ export class LoadingScene {
     private readonly store: StateStore,
     private readonly network: NetworkService,
     private readonly overlay: HTMLElement,
-    private readonly onReady: () => void
+    private readonly onReady: () => void,
+    private readonly onAuthRequired: () => void
   ) {}
 
   async start(): Promise<void> {
@@ -24,7 +25,14 @@ export class LoadingScene {
       this.store.setScene("lobby", "已连接，可以创建或加入房间");
       this.onReady();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "连接失败";
+      const message = err instanceof Error ? err.message : "连接失败，请刷新重试";
+      const authExpired =
+        !this.store.get().authToken || /登录已失效|未登录|401|UNAUTHORIZED/i.test(message);
+      if (authExpired) {
+        this.store.clearAuth();
+        this.onAuthRequired();
+        return;
+      }
       this.store.patch({ statusMessage: message });
       const statusBar = this.overlay.querySelector(".status-bar");
       if (statusBar) {

@@ -1,5 +1,5 @@
 import type { CreateRoomOptions, RoomListItem } from "@shared/protocol/types.js";
-import { StateStore } from "../state/StateStore.js";
+import { StateStore, peekStoredAuth } from "../state/StateStore.js";
 import { NetworkService } from "../network/NetworkService.js";
 import { AuthScene } from "../scenes/AuthScene.js";
 import { LoadingScene } from "../scenes/LoadingScene.js";
@@ -32,22 +32,25 @@ export class App {
     }
     this.container = container as HTMLElement;
     this.overlay = overlay as HTMLElement;
+    this.network.setAuthExpiredHandler(() => this.handleAuthExpired());
   }
 
   async start(): Promise<void> {
-    const state = this.store.get();
-    if (state.authToken && state.currentUser) {
+    const stored = peekStoredAuth();
+    if (stored) {
+      const valid = await this.network.verifyToken(stored.token);
+      if (!valid) {
+        this.store.clearAuth();
+        this.store.patch({ statusMessage: "登录已过期，请重新注册或登录" });
+        this.showAuth();
+        return;
+      }
+      this.store.setAuth(stored.token, stored.user);
       await this.enterPlatform();
       return;
     }
 
-    this.authScene = new AuthScene(
-      this.store,
-      this.network,
-      this.overlay,
-      () => void this.handleAuthenticated()
-    );
-    this.authScene.start();
+    this.showAuth();
   }
 
   private async handleAuthenticated(): Promise<void> {
@@ -61,9 +64,38 @@ export class App {
       this.store,
       this.network,
       this.overlay,
-      () => this.showLobby()
+      () => this.showLobby(),
+      () => this.handleAuthExpired()
     );
     await this.loadingScene.start();
+  }
+
+  private handleAuthExpired(): void {
+    this.pendingCreatePassword = undefined;
+    this.gameScene?.dispose();
+    this.gameScene = null;
+    this.roomScene?.dispose();
+    this.roomScene = null;
+    this.lobbyScene?.dispose();
+    this.lobbyScene = null;
+    this.loadingScene?.dispose();
+    this.loadingScene = null;
+    this.authScene?.dispose();
+    this.authScene = null;
+    this.showAuth();
+  }
+
+  private showAuth(): void {
+    this.loadingScene?.dispose();
+    this.loadingScene = null;
+    this.store.patch({ scene: "auth" });
+    this.authScene = new AuthScene(
+      this.store,
+      this.network,
+      this.overlay,
+      () => void this.handleAuthenticated()
+    );
+    this.authScene.start();
   }
 
   private showLobby(): void {
@@ -210,12 +242,6 @@ export class App {
     this.loadingScene = null;
 
     this.network.logout();
-    this.authScene = new AuthScene(
-      this.store,
-      this.network,
-      this.overlay,
-      () => void this.handleAuthenticated()
-    );
-    this.authScene.start();
+    this.showAuth();
   }
 }
